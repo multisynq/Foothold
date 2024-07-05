@@ -1,4 +1,4 @@
-import { Connection, Keypair, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, sendAndConfirmTransaction } from '@solana/web3.js';
 import { SoarProgram, GameType, Genre } from '@magicblock-labs/soar-sdk';
 import bs58 from 'bs58';
 import dotenv from 'dotenv';
@@ -14,17 +14,18 @@ console.log('Leaderboard NFT:', leaderboardNft.toString());
 const client = SoarProgram.getFromConnection(connection, defaultPayer.publicKey);
 
 const gameTitle = "Foothold";
-const gameDescription = "Foothold is an instantly-joinable multiplayer game where you and your friends are defending your central spaceship from increasingly large waves of Guardian bots. If the bots reach your ship, they detonate - use your tank's rebound rounds to eliminate the threat to your evil invasion!";
+const gameDescription = "Foothold is an instantly-joinable multiplayer game where players compete to hold the foothold for the longest time.";
 const genre = Genre.Action;
 const gameType = GameType.Web;
-const nftMeta = Keypair.generate().publicKey; // Assuming you have minted NFT for the game
+const nftMeta = leaderboardNft; // Assuming you have minted NFT for the game
 const auths = [authWallet];  // Replace with actual array of authorized Keypairs
 const _auths = auths.map((keypair) => keypair.publicKey);
+
+let newKeypair = Keypair.generate();
 
 async function createGameAndLeaderboard() {
   try {
     // Create the game on-chain
-    let newKeypair = Keypair.generate();
     console.log('New keypair:', newKeypair.publicKey.toString(), newKeypair.secretKey.toString());
     const { newGame, transaction } = await client.initializeNewGame(
       newKeypair.publicKey,
@@ -37,7 +38,14 @@ async function createGameAndLeaderboard() {
     );
 
     // Send and confirm the transaction
-    await connection.sendTransaction(transaction, [defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
+    const signature = await sendAndConfirmTransaction(connection, transaction, [defaultPayer, newKeypair], { skipPreflight: false, preflightCommitment: "confirmed" });
+    console.log('Transaction signature:', signature);
+
+    // Ensure the new game account exists
+    const gameAccount = await client.fetchGameAccount(newGame);
+    if (!gameAccount) {
+      throw new Error(`Failed to fetch game account: ${newGame.toString()}`);
+    }
 
     console.log('Game created:', newGame.toString());
 
@@ -51,7 +59,9 @@ async function createGameAndLeaderboard() {
       true // isAscending
     );
 
-    await connection.sendTransaction(transactionIx.transaction, [authWallet], { skipPreflight: false, preflightCommitment: "confirmed" });
+    // Send and confirm the transaction for leaderboard
+    const leaderboardSignature = await sendAndConfirmTransaction(connection, transactionIx.transaction, [defaultPayer, authWallet], { skipPreflight: false, preflightCommitment: "confirmed" });
+    console.log('Leaderboard transaction signature:', leaderboardSignature);
 
     console.log('Leaderboard created');
   } catch (error) {
