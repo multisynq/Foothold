@@ -106,7 +106,8 @@ class BotActor extends mix(Actor).with(AM_Spatial, AM_OnGrid, AM_Behavioral) {
     }
 
     killMe(s=0.3, onTarget) {
-        FireballActor.create({translation:this.translation, scale:[s,s,s], onTarget});
+        let t = this.translation;
+        FireballActor.create({translation:[t[0],t[1], t[2]], scale:[s,s,s], onTarget});
         this.publish("bots", "destroyedBot", onTarget);
         this.destroy();
     }
@@ -120,34 +121,48 @@ class BotActor extends mix(Actor).with(AM_Spatial, AM_OnGrid, AM_Behavioral) {
     }
 
     doFlee() {
-        // blow up at the tower
-        if ( v_mag2Sqr(this.translation) < 20 ) this.killMe(1, true);
-        // otherwise, check if we need to move around an object
-        if (!this.doomed) {
-            this.future(100).doFlee();
+        let distSqr = v_mag2Sqr(this.translation);
+        // stop avoiding collisions when we get close to the tower
+        if ( distSqr < 1000 ) {
+            // if we are close to the tower, blow up
+            if ( distSqr < 20 ) {
+                this.killMe(1, true);
+            }
+            if ( !this.doomed ) this.future(100).doFlee();
+        } else { // otherwise, check if we need to move around an object
+            if ( !this.doomed ) this.future(100).doFlee();
             const blockers = this.pingAll("block");
-            if (blockers.length===0) return;
+            if (blockers.length===0 || blockers.length>4) return;
             blockers.forEach(blocker => this.flee(blocker));
         }
     }
 
-    flee(bot) {
-        const from = v3_sub(this.translation, bot.translation);
+    flee(blocker) {
+        const from = v3_sub(this.translation, blocker.translation);
         const mag2 = v_mag2Sqr(from);
-        if (mag2 > this.radiusSqr) return;
-        if (mag2===0) {
+        let r, r2;
+        if (blocker.isAvatar) {
+            r2 = this.radiusSqr*2;
+            r = this.radius*2;
+        } else {
+            r2 = this.radiusSqr;
+            r = this.radius;
+        }
+
+        if (mag2 > r2) return;
+        // move the bot to the radius of the blocker
+        if (mag2<0.00001) {
             const a = Math.random() * 2 * Math.PI;
-            from[0] = this.radius * Math.cos(a);
+            from[0] = r * Math.cos(a);
             from[1] = 0;
-            from[2] = this.radius* Math.sin(a);
+            from[2] = r * Math.sin(a);
         } else {
             let mag = Math.sqrt(mag2);
-            if (bot.isAvatar) mag/=2;
-            from[0] = this.radius * from[0] / mag;
+            from[0] = r * from[0] / mag;
             from[1] = 0;
-            from[2] = this.radius * from[2] / mag;
+            from[2] = r * from[2] / mag;
         }
-        const translation = v3_add(this.translation, from);
+        const translation = v3_add(blocker.translation, from);
         this.set({translation});
     }
 
