@@ -513,45 +513,40 @@ export class MyModelRoot extends GameModelRoot {
         this.subscribe("game", "bots", this.demoBots); // from user input
 
         const bollardScale = 3; // size of the bollard
-        const bollardDistance = bollardScale*3; // distance between bollards
+        const bollardDistance = bollardScale * 3; // distance between bollards
 
         this.base = BaseActor.create({gridScale: bollardScale});
         this.maxBots = 1000;
         this.spawnRadius = 400;
-        let v = [-10,0,0];
 
-        // place the fins for collisions
-        for (let i=0; i<3; i++) {
-            const p3 = Math.PI*2/3;
-            this.makeSkyscraper(v[0], 0, v[2],i*p3-Math.PI/2, -1, 1.5);
-            v = v3_rotate( v, q_axisAngle([0,1,0], p3) );
-        }
+        // Place the bollards in a washer shape with randomness
+        this.placeBollards(75, 125, bollardDistance);
 
-        let corner = 12;
-        [[-corner,-corner, Math.PI/2-Math.PI/4], [-corner, corner, Math.PI/2+Math.PI/4], [corner, corner, Math.PI/2+Math.PI-Math.PI/4], [corner,-corner, Math.PI/2+Math.PI+Math.PI/4]].forEach( xy => {
-            this.makeSkyscraper(bollardDistance*xy[0]+1.5, 0, bollardDistance*xy[1]+1.5,xy[2], 5, 1.5);
-        });
-
-        //place the bollards
-        corner--;
-        for (let x=-corner; x<=corner; x++) for (let y=-corner; y<=corner; y++) {
-            if ((y<=-corner+2 || y>=corner-2) || (x<=-corner+2 || x>=corner-2) || (y<=-corner+7 && x<=-corner+7)) {
-                this.makeBollard(bollardDistance*x, bollardDistance*y);
-            }
-        }
+        // Place other game elements here as needed
         const d = 290;
         // the main tower
-        const tower0 = this.makeSkyscraper( 0, -1.2, 0, -0.533, 0); // no radius on central tower
-        this.makeSkyscraper( 0, -1,  d, Math.PI/2, 1, 0);
-        this.makeSkyscraper( 0, -1, -d, 0, 2, 0);
-        this.makeSkyscraper( d, -1,  0, 0, 3, 0);
-        this.makeSkyscraper(-d-10, -3,  -8, Math.PI+2.5, 4, 0);
+        const tower0 = this.makeSkyscraper(0, -1.2, 0, -0.533, 0); // no radius on central tower
+        this.makeSkyscraper(0, -1, d, Math.PI / 2, 1, 0);
+        this.makeSkyscraper(0, -1, -d, 0, 2, 0);
+        this.makeSkyscraper(d, -1, 0, 0, 3, 0);
+        this.makeSkyscraper(-d - 10, -3, -8, Math.PI + 2.5, 4, 0);
 
-        HealthCoinActor.create({ parent: tower0, translation: [0, 15, 0] });
+        HealthCoinActor.create({parent: tower0, translation: [0, 15, 0]});
 
         LobbyRelayActor.create();
 
         this.startGame();
+    }
+
+    placeBollards(innerRadius, outerRadius, bollardDistance) {
+        const numBollards = 400; // Number of bollards to place
+        for (let i = 0; i < numBollards; i++) {
+            const angle = Math.random() * 2 * Math.PI; // Random angle
+            const radius = innerRadius + Math.random() * (outerRadius - innerRadius); // Random radius within bounds
+            const x = radius * Math.cos(angle);
+            const z = radius * Math.sin(angle);
+            this.makeBollard(x, z);
+        }
     }
 
     startGame() {
@@ -562,10 +557,12 @@ export class MyModelRoot extends GameModelRoot {
 
     endGame() {
         console.log("End Game");
-        this.service('ActorManager').actors.forEach( value => {if (value.resetGame) value.future(0).resetGame();});
+        this.service('ActorManager').actors.forEach(value => {
+            if (value.resetGame) value.future(0).resetGame();
+        });
     }
 
-    demoBots( numBots ) {
+    demoBots(numBots) {
         this.makeWave(0, numBots);
     }
 
@@ -573,32 +570,41 @@ export class MyModelRoot extends GameModelRoot {
         // filter out scheduled waves from games that already finished
         if (this.gameState.gameEnded || key !== this.gameState.runKey) return;
 
-        const { totalBots } = this.gameState;
+        const {totalBots} = this.gameState;
         let actualBots = Math.min(this.maxBots, numBots);
-        if ( totalBots + actualBots > this.maxBots) actualBots = this.maxBots-totalBots;
+        if (totalBots + actualBots > this.maxBots) actualBots = this.maxBots - totalBots;
 
         const r = this.spawnRadius; // radius of spawn
-        const a = Math.PI*2*Math.random(); // come from random direction
-        for (let n = 0; n<actualBots; n++) {
-            const aa = a + (0.5-Math.random())*Math.PI/4; // angle +/- Math.PI/4 around r
-            const rr = r+100*Math.random();
-            const x = Math.sin(aa)*rr;
-            const y = Math.cos(aa)*rr;
-            const index = Math.floor(20*Math.random());
+        const a = Math.PI * 2 * Math.random(); // come from random direction
+        for (let n = 0; n < actualBots; n++) {
+            const aa = a + (0.5 - Math.random()) * Math.PI / 4; // angle +/- Math.PI / 4 around r
+            const rr = r + 100 * Math.random();
+            const x = Math.sin(aa) * rr;
+            const y = Math.cos(aa) * rr;
+            const index = Math.floor(20 * Math.random());
             // stagger when the bots get created
-            this.future(Math.floor(Math.random()*200)).makeBot(x, y, index);
+            this.future(Math.floor(Math.random() * 200)).makeBot(x, y, index);
         }
-        if (wave>0) this.future(30000).makeWave(wave+1, Math.floor(numBots*1.2), key);
+        if (wave > 0) this.future(30000).makeWave(wave + 1, Math.floor(numBots * 1.2), key);
 
-        this.publish("bots", "madeWave", { wave, addedBots: actualBots });
-   }
+        this.publish("bots", "madeWave", {wave, addedBots: actualBots});
+    }
 
     makeBollard(x, z) {
-        BollardActor.create( { tags: ["block"], parent: this.base, obstacle: true, radius:1.5, translation: [x, 0, z]} );
+        BollardActor.create({tags: ["block"], parent: this.base, obstacle: true, radius: 1.5, translation: [x, 0, z]});
     }
 
     makeSkyscraper(x, y, z, r, index, radius) {
-        const tower = TowerActor.create( { tags: radius ? ["block"] : [], parent: this.base, index, obstacle: true, radius, translation:[x, y, z], height:y, rotation: q_axisAngle([0,1,0],r)} );
+        const tower = TowerActor.create({
+            tags: radius ? ["block"] : [],
+            parent: this.base,
+            index,
+            obstacle: true,
+            radius,
+            translation: [x, y, z],
+            height: y,
+            rotation: q_axisAngle([0, 1, 0], r)
+        });
         return tower;
     }
 
@@ -607,4 +613,6 @@ export class MyModelRoot extends GameModelRoot {
         return bot;
     }
 }
+
 MyModelRoot.register("MyModelRoot");
+
