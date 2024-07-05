@@ -110,17 +110,11 @@
     </div>
 
     <script>
-      const connectWalletButton = document.getElementById(
-        "connect-wallet-button"
-      );
-      const registerButton = document.getElementById(
-        "initialize-player-button"
-      );
+      const connectWalletButton = document.getElementById("connect-wallet-button");
+      const registerButton = document.getElementById("initialize-player-button");
       const submitScoreButton = document.getElementById("submit-score-button");
       const registrationModal = document.getElementById("registration-modal");
-      const modalRegisterButton = document.getElementById(
-        "modal-register-button"
-      );
+      const modalRegisterButton = document.getElementById("modal-register-button");
       const modalCloseButton = document.getElementById("modal-close-button");
       let walletAddress = null;
 
@@ -131,10 +125,7 @@
           try {
             const resp = await window.solana.connect();
             walletAddress = resp.publicKey.toString();
-            const truncatedAddress = `${walletAddress.slice(
-              0,
-              3
-            )}...${walletAddress.slice(-3)}`;
+            const truncatedAddress = `${walletAddress.slice(0, 3)}...${walletAddress.slice(-3)}`;
             connectWalletButton.innerText = `Wallet: ${truncatedAddress}`;
             console.log(`Connected to wallet ${walletAddress}`);
 
@@ -150,19 +141,13 @@
             }
             submitScoreButton.style.display = "inline";
             if (window.unityInstance) {
-              window.unityInstance.SendMessage(
-                "Croquet",
-                "Initialize",
-                walletAddress
-              );
+              window.unityInstance.SendMessage("Croquet", "Initialize", walletAddress);
             }
           } catch (err) {
             console.error("Failed to connect to wallet", err);
           }
         } else {
-          alert(
-            "Solana wallet not found. Please install a wallet extension like Phantom."
-          );
+          alert("Solana wallet not found. Please install a wallet extension like Phantom.");
         }
       }
 
@@ -174,82 +159,19 @@
           const initializeResponse = await fetch("/initializePlayerAccount", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ playerPublicKey: walletAddress }),
+            body: JSON.stringify({ walletAddress }),
           });
           const initializeData = await initializeResponse.json();
-          const initializeTransaction = solanaWeb3.Transaction.from(
-            new Uint8Array(
-              atob(initializeData.transaction)
-                .split("")
-                .map((char) => char.charCodeAt(0))
-            )
-          );
-
-          // Ensure the transaction has the correct fee payer
-          initializeTransaction.feePayer = new solanaWeb3.PublicKey(
-            walletAddress
-          );
-
-          // Sign the transaction
-          const { signature: initSignature } =
-            await window.solana.signTransaction(initializeTransaction);
-          initializeTransaction.addSignature(
-            new solanaWeb3.PublicKey(walletAddress),
-            initSignature
-          );
+          console.log("Initialize data:", initializeData);
 
           // Register player entry
           const registerResponse = await fetch("/registerPlayerEntry", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ playerPublicKey: walletAddress }),
+            body: JSON.stringify({ walletAddress }),
           });
           const registerData = await registerResponse.json();
-          const registerTransaction = solanaWeb3.Transaction.from(
-            new Uint8Array(
-              atob(registerData.transaction)
-                .split("")
-                .map((char) => char.charCodeAt(0))
-            )
-          );
-
-          // Ensure the transaction has the correct fee payer
-          registerTransaction.feePayer = new solanaWeb3.PublicKey(
-            walletAddress
-          );
-
-          // Sign the transaction
-          const { signature: regSignature } =
-            await window.solana.signTransaction(registerTransaction);
-          registerTransaction.addSignature(
-            new solanaWeb3.PublicKey(walletAddress),
-            regSignature
-          );
-
-          // Serialize the signed transactions
-          const serializedInitTransaction = initializeTransaction
-            .serialize({ requireAllSignatures: false })
-            .toString("base64");
-          const serializedRegTransaction = registerTransaction
-            .serialize({ requireAllSignatures: false })
-            .toString("base64");
-
-          // Send the signed transactions back to the server for confirmation
-          await fetch("/confirmTransaction", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              signedTransaction: serializedInitTransaction,
-            }),
-          });
-
-          await fetch("/confirmTransaction", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              signedTransaction: serializedRegTransaction,
-            }),
-          });
+          console.log("Register data:", registerData);
 
           console.log("Player registered successfully");
           registrationModal.style.display = "none";
@@ -268,89 +190,26 @@
         registrationModal.style.display = "none";
       });
 
-      registerButton.addEventListener("click", () => {
-        registrationModal.style.display = "flex";
-      });
-
-      modalRegisterButton.addEventListener("click", registerPlayer);
-      modalCloseButton.addEventListener("click", () => {
-        registrationModal.style.display = "none";
-      });
-
       async function submitScore() {
         try {
           const score = prompt("Enter your score:");
           if (!score) return;
 
-          // Fetch the transaction from the server
-          const response = await fetch("/submitScore", {
+          const response = await fetch("/submit-score", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              playerPublicKey: walletAddress,
+              walletAddress,
               score: parseInt(score),
             }),
           });
+
           const data = await response.json();
-          console.log("Score submission data:", data);
-
-          // Create the transaction from the base64 string
-          const submitScoreTransaction = solanaWeb3.Transaction.from(
-            new Uint8Array(
-              atob(data.transaction)
-                .split("")
-                .map((char) => char.charCodeAt(0))
-            )
-          );
-          console.log("Submit score transaction:", submitScoreTransaction);
-
-          // Ensure the transaction has the correct fee payer
-          submitScoreTransaction.feePayer = new solanaWeb3.PublicKey(
-            walletAddress
-          );
-
-          // Sign the transaction
-          const { signature } = await window.solana.signTransaction(
-            submitScoreTransaction
-          );
-          submitScoreTransaction.addSignature(
-            new solanaWeb3.PublicKey(walletAddress),
-            signature
-          );
-          console.log("Signed transaction:", submitScoreTransaction);
-
-          // Ensure the transaction is signed correctly before serialization
-          if (
-            !submitScoreTransaction ||
-            !submitScoreTransaction.signatures ||
-            !submitScoreTransaction.signatures[0].signature
-          ) {
-            throw new Error("Transaction was not signed properly.");
-          }
-
-          // Serialize the signed transaction
-          const serializedTransaction = submitScoreTransaction
-            .serialize({ requireAllSignatures: false })
-            .toString("base64");
-
-          // Send the signed transaction back to the server for confirmation
-          await fetch("/confirmTransaction", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              signedTransaction: serializedTransaction,
-            }),
-          });
-
-          console.log("Score submitted successfully");
+          console.log("Score submitted successfully:", data);
         } catch (error) {
           console.error("Error submitting score:", error);
         }
       }
-
-      submitScoreButton.addEventListener("click", submitScore);
-
-      submitScoreButton.addEventListener("click", submitScore);
 
       submitScoreButton.addEventListener("click", submitScore);
 
@@ -363,11 +222,7 @@
           .then((response) => response.json())
           .then((data) => {
             if (typeof unityInstance !== "undefined") {
-              unityInstance.SendMessage(
-                "ScoreSender",
-                "ReceiveServerTime",
-                data.serverTime
-              );
+              unityInstance.SendMessage("ScoreSender", "ReceiveServerTime", data.serverTime);
             }
           })
           .catch((error) => {
@@ -434,20 +289,16 @@
           if (container.requestFullscreen) {
             container.requestFullscreen();
           } else if (container.webkitRequestFullscreen) {
-            // Safari and iOS support
             container.webkitRequestFullscreen();
           } else if (container.msRequestFullscreen) {
-            // IE/Edge support
             container.msRequestFullscreen();
           }
         } else {
           if (document.exitFullscreen) {
             document.exitFullscreen();
           } else if (document.webkitExitFullscreen) {
-            // Safari and iOS support
             document.webkitExitFullscreen();
           } else if (document.msExitFullscreen) {
-            // IE/Edge support
             document.msExitFullscreen();
           }
         }
