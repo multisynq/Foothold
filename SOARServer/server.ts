@@ -1,3 +1,4 @@
+import cors from 'cors';
 import express, { Request, Response } from 'express';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
@@ -14,7 +15,9 @@ dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
+app.use(cors()); /* NEW */
 
+app.use(express.json());
 app.use(bodyParser.json());
 app.use(express.static('public'));
 
@@ -32,7 +35,18 @@ if (process.env.LEADERBOARD_PDA_PUBLIC_KEY) {
   throw new Error('LEADERBOARD_PDA_PUBLIC_KEY is not defined');
 }
 
-const db = new Loki('users.db', { autoload: true, autosave: true, autosaveInterval: 4000 });
+const db = new Loki('users.db', { 
+  autoload: true, 
+  autosave: true, 
+  autosaveInterval: 4000, 
+  autoloadCallback: () => {
+    users = db.getCollection('users');
+    if (!users) {
+      users = db.addCollection('users');
+    }
+  } 
+});
+
 let users = db.getCollection('users');
 if (!users) {
   users = db.addCollection('users');
@@ -54,6 +68,13 @@ app.post('/register', async (req: Request, res: Response) => {
       secretKey: bs58.encode(keypair.secretKey),
     };
     users.insert(user);
+    db.saveDatabase((err) => {
+      if (err) {
+        console.error('Error saving database:', err);
+      } else {
+        console.log('Database saved successfully.');
+      }
+    });
   }
 
   try {
