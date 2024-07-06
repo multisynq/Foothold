@@ -21,6 +21,7 @@ app.use(express.static('public'));
 const connection = new Connection(process.env.CONNECTION_URL!, "confirmed");
 const defaultPayer = Keypair.fromSecretKey(bs58.decode(process.env.DEFAULT_PAYER_SECRET_KEY!));
 const authWallet = Keypair.fromSecretKey(bs58.decode(process.env.AUTH_WALLET_SECRET_KEY!));
+const LEADERBOARD_NFT_PUBKEY = process.env.LEADERBOARD_NFT_PUBLIC_KEY!;
 console.log('Default payer:', defaultPayer.publicKey.toBase58());
 console.log('Auth wallet:', authWallet.publicKey.toBase58());
 const client = SoarProgram.getFromConnection(connection, defaultPayer.publicKey);
@@ -53,28 +54,37 @@ app.post('/register', async (req: Request, res: Response) => {
       secretKey: bs58.encode(keypair.secretKey),
     };
     users.insert(user);
-  } else {
-    return res.status(400).json({ error: 'User already registered' });
   }
 
   try {
     const playerKeypair = Keypair.fromSecretKey(bs58.decode(user.secretKey));
-    const player = new PublicKey(walletAddress);
 
     // Initialize player account
-    const { transaction: initTransaction } = await client.initializePlayerAccount(player, "PlayerUsername", playerKeypair.publicKey);
-    initTransaction.feePayer = defaultPayer.publicKey;
-    initTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
-    initTransaction.partialSign(playerKeypair, defaultPayer);
-    await sendAndConfirmTransaction(connection, initTransaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
+    try {
+      const { transaction: initTransaction } = await client.initializePlayerAccount(playerKeypair.publicKey, "PlayerUsername", LEADERBOARD_NFT_PUBKEY);
+      initTransaction.feePayer = defaultPayer.publicKey;
+      initTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
+
+      await sendAndConfirmTransaction(connection, initTransaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
+    } catch (error) {
+      if (!error.message.includes("already in use")) {
+        throw error;  // Re-throw if it's not the "already in use" error
+      }
+    }
 
     // Register player entry
     const leaderboardAccount = await client.fetchLeaderBoardAccount(leaderboardPda);
-    const { transaction: registerTransaction } = await client.registerPlayerEntryForLeaderBoard(player, leaderboardAccount.address);
-    registerTransaction.feePayer = defaultPayer.publicKey;
-    registerTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
-    registerTransaction.partialSign(playerKeypair, defaultPayer);
-    await sendAndConfirmTransaction(connection, registerTransaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
+    try {
+      const { transaction: registerTransaction } = await client.registerPlayerEntryForLeaderBoard(playerKeypair.publicKey, leaderboardAccount.address);
+      registerTransaction.feePayer = defaultPayer.publicKey;
+      registerTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
+
+      await sendAndConfirmTransaction(connection, registerTransaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
+    } catch (error) {
+      if (!error.message.includes("already in use")) {
+        throw error;  // Re-throw if it's not the "already in use" error
+      }
+    }
 
     res.json({ message: 'User registered and player account initialized successfully' });
   } catch (error) {
@@ -111,37 +121,49 @@ app.post('/verify-score', (req: Request, res: Response) => {
 });
 
 app.post('/submit-score', async (req: Request, res: Response) => {
-  const { walletAddress } = req.body;
-  const scoreData = scores[walletAddress];
-  if (!scoreData) {
-    return res.status(400).json({ error: 'Score not found. Please verify score first.' });
-  }
-  const { score } = scoreData;
+  const { walletAddress, score } = req.body;
 
   try {
+    // Fetch the leaderboard account
+    const leaderboardAccount = await client.fetchLeaderBoardAccount(leaderboardPda);
+    
+    // Find the user in the database
     const user = users.findOne({ walletAddress });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Retrieve the player's keypair from the secret key
     const playerKeypair = Keypair.fromSecretKey(bs58.decode(user.secretKey));
-    const transactionIx = await client.submitScoreToLeaderBoard(
-      new PublicKey(walletAddress),
-      playerKeypair.publicKey,
-      leaderboardPda,
-      new BN(score)
+    console.log('Player keypair:', playerKeypair.publicKey.toBase58());
+    
+    // Create the transaction instruction
+    const { transaction: submitScoreTransaction } = await client.submitScoreToLeaderBoard(
+      playerKeypair.publicKey,    // Player public key
+      authWallet.publicKey,       // Authority public key
+      leaderboardAccount.address, // Leaderboard account address
+      new BN(score)               // Score to be submitted
     );
 
-    const transaction = new Transaction().add(transactionIx);
-    transaction.feePayer = defaultPayer.publicKey;
-    transaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
-    transaction.partialSign(playerKeypair, defaultPayer);
+    // Set transaction fee payer and recent blockhash
+    submitScoreTransaction.feePayer = defaultPayer.publicKey;
+    submitScoreTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
 
-    await sendAndConfirmTransaction(connection, transaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
+    // Sign and send the transaction
+    const signedTransaction = await sendAndConfirmTransaction(
+      connection, 
+      submitScoreTransaction, 
+      [defaultPayer, authWallet], 
+      { skipPreflight: false, preflightCommitment: "confirmed" }
+    );
 
-    delete scores[walletAddress];
+    // Log the transaction ID for debugging purposes
+    console.log('Score submission transaction ID:', signedTransaction);
+
     res.json({ message: 'Score successfully submitted to leaderboard.' });
   } catch (error) {
+    // Log error details for debugging purposes
+    console.error('Error submitting score to leaderboard:', error.message);
     res.status(500).json({ error: 'Failed to submit score to leaderboard.', details: error.message });
   }
 });
