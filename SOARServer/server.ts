@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import { Connection, Keypair, PublicKey, sendAndConfirmTransaction, Transaction, SystemProgram } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, sendAndConfirmTransaction, Transaction } from '@solana/web3.js';
 import { SoarProgram } from '@magicblock-labs/soar-sdk';
 import bs58 from 'bs58';
 import nacl from 'tweetnacl';
@@ -41,16 +41,45 @@ const nonces: { [key: string]: string } = {};
 const scores: { [key: string]: { score: number; message: string } } = {};
 const serverTimes: { [key: string]: string } = {};
 
-app.post('/register', (req: Request, res: Response) => {
+app.post('/register', async (req: Request, res: Response) => {
   const { walletAddress } = req.body;
-  const keypair = Keypair.generate();
-  const user = {
-    walletAddress,
-    publicKey: keypair.publicKey.toBase58(),
-    secretKey: bs58.encode(keypair.secretKey),
-  };
-  users.insert(user);
-  res.json({ message: 'User registered successfully', user });
+  let user = users.findOne({ walletAddress });
+
+  if (!user) {
+    const keypair = Keypair.generate();
+    user = {
+      walletAddress,
+      publicKey: keypair.publicKey.toBase58(),
+      secretKey: bs58.encode(keypair.secretKey),
+    };
+    users.insert(user);
+  } else {
+    return res.status(400).json({ error: 'User already registered' });
+  }
+
+  try {
+    const playerKeypair = Keypair.fromSecretKey(bs58.decode(user.secretKey));
+    const player = new PublicKey(walletAddress);
+
+    // Initialize player account
+    const { transaction: initTransaction } = await client.initializePlayerAccount(player, "PlayerUsername", playerKeypair.publicKey);
+    initTransaction.feePayer = defaultPayer.publicKey;
+    initTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
+    initTransaction.partialSign(playerKeypair, defaultPayer);
+    await sendAndConfirmTransaction(connection, initTransaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
+
+    // Register player entry
+    const leaderboardAccount = await client.fetchLeaderBoardAccount(leaderboardPda);
+    const { transaction: registerTransaction } = await client.registerPlayerEntryForLeaderBoard(player, leaderboardAccount.address);
+    registerTransaction.feePayer = defaultPayer.publicKey;
+    registerTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
+    registerTransaction.partialSign(playerKeypair, defaultPayer);
+    await sendAndConfirmTransaction(connection, registerTransaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
+
+    res.json({ message: 'User registered and player account initialized successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to initialize and register player account', details: error.message });
+  }
 });
 
 app.post('/get-server-time', (req: Request, res: Response) => {
@@ -117,65 +146,12 @@ app.post('/submit-score', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/initializePlayerAccount', async (req: Request, res: Response) => {
-  const { walletAddress } = req.body;
-  try {
-    const user = users.findOne({ walletAddress });
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const playerKeypair = Keypair.fromSecretKey(bs58.decode(user.secretKey));
-    const player = new PublicKey(walletAddress);
-    const { transaction } = await client.initializePlayerAccount(player, "PlayerUsername", playerKeypair.publicKey);
-    transaction.feePayer = defaultPayer.publicKey;
-    transaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
-    transaction.partialSign(playerKeypair, defaultPayer);
-
-    await sendAndConfirmTransaction(connection, transaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
-    res.json({ message: 'Player account initialized successfully.' });
-  } catch (error) {
-    if (error.message.includes("already in use")) {
-      res.status(400).json({ error: 'Player account already initialized.' });
-    } else {
-      res.status(500).json({ error: error.message });
-    }
-  }
-});
-
-app.post('/registerPlayerEntry', async (req: Request, res: Response) => {
-  const { walletAddress } = req.body;
-  try {
-    const user = users.findOne({ walletAddress });
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const playerKeypair = Keypair.fromSecretKey(bs58.decode(user.secretKey));
-    const player = new PublicKey(walletAddress);
-    const leaderboardAccount = await client.fetchLeaderBoardAccount(leaderboardPda);
-    const { transaction } = await client.registerPlayerEntryForLeaderBoard(player, leaderboardAccount.address);
-    transaction.feePayer = defaultPayer.publicKey;
-    transaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
-    transaction.partialSign(playerKeypair, defaultPayer);
-
-    await sendAndConfirmTransaction(connection, transaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
-    res.json({ message: 'Player entry registered successfully.' });
-  } catch (error) {
-    if (error.message.includes("already in use")) {
-      res.status(400).json({ error: 'Player entry already registered.' });
-    } else {
-      res.status(500).json({ error: error.message });
-    }
-  }
-});
-
 app.post('/checkPlayerStatus', async (req: Request, res: Response) => {
   const { walletAddress } = req.body;
   try {
     const user = users.findOne({ walletAddress });
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.json({ isInitialized: false, isRegistered: false });
     }
 
     const player = new PublicKey(walletAddress);
