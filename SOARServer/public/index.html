@@ -167,6 +167,9 @@
           console.log("Player registered successfully");
           registrationModal.style.display = "none";
           registerButton.style.display = "none";
+
+          window.parent.postMessage(walletAddress, '*');
+          
         } catch (error) {
           console.error("Error during registration process:", error);
         }
@@ -353,7 +356,7 @@
 
             var scriptPlaceholder = document.getElementById("script-placeholder");
             var additionalScript = document.createElement("script");
-            additionalScript.src = "index-47f8268c.js";
+            additionalScript.src = "index-9a3964fc.js";
             scriptPlaceholder.appendChild(additionalScript);
 
             if (room) {

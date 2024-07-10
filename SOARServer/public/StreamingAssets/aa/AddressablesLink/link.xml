@@ -2,7 +2,9 @@
   <assembly fullname="Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null">
     <type fullname="bounceNoise" preserve="all" />
     <type fullname="ChangeColorByHealth" preserve="all" />
+    <type fullname="ChooseModelBasedOnDistance" preserve="all" />
     <type fullname="EnemyRandomizer" preserve="all" />
+    <type fullname="ExplodeOnEnding" preserve="all" />
     <type fullname="GameState" preserve="all" />
     <type fullname="HealthCoinController" preserve="all" />
     <type fullname="moveAround" preserve="all" />
