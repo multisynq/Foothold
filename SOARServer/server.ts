@@ -57,10 +57,16 @@ const scores: { [key: string]: { score: number; message: string } } = {};
 const serverTimes: { [key: string]: string } = {};
 
 app.post('/register', async (req: Request, res: Response) => {
+  console.log('Received /register request with body:', req.body);
+
   const { walletAddress } = req.body;
+  console.log('Extracted walletAddress:', walletAddress);
+
   let user = users.findOne({ walletAddress });
+  console.log('User lookup result:', user);
 
   if (!user) {
+    console.log('User not found, creating a new one.');
     const keypair = Keypair.generate();
     user = {
       walletAddress,
@@ -68,6 +74,8 @@ app.post('/register', async (req: Request, res: Response) => {
       secretKey: bs58.encode(keypair.secretKey),
     };
     users.insert(user);
+    console.log('Inserted new user into database:', user);
+
     db.saveDatabase((err) => {
       if (err) {
         console.error('Error saving database:', err);
@@ -75,43 +83,63 @@ app.post('/register', async (req: Request, res: Response) => {
         console.log('Database saved successfully.');
       }
     });
+  } else {
+    console.log('User already exists:', user);
   }
 
   try {
     const playerKeypair = Keypair.fromSecretKey(bs58.decode(user.secretKey));
+    console.log('Player keypair generated:', playerKeypair.publicKey.toBase58());
 
     // Initialize player account
     try {
+      console.log('Initializing player account...');
       const { transaction: initTransaction } = await client.initializePlayerAccount(playerKeypair.publicKey, "PlayerUsername", LEADERBOARD_NFT_PUBKEY);
       initTransaction.feePayer = defaultPayer.publicKey;
       initTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
+      console.log('Initialization transaction prepared:', initTransaction);
 
       await sendAndConfirmTransaction(connection, initTransaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
+      console.log('Player account initialized successfully.');
     } catch (error) {
       if (!error.message.includes("already in use")) {
+        console.error('Error during player account initialization:', error);
         throw error;  // Re-throw if it's not the "already in use" error
+      } else {
+        console.log('Player account already in use, skipping initialization.');
       }
     }
 
     // Register player entry
+    console.log('Fetching leaderboard account...');
     const leaderboardAccount = await client.fetchLeaderBoardAccount(leaderboardPda);
+    console.log('Fetched leaderboard account:', leaderboardAccount.address);
+
     try {
+      console.log('Registering player entry for leaderboard...');
       const { transaction: registerTransaction } = await client.registerPlayerEntryForLeaderBoard(playerKeypair.publicKey, leaderboardAccount.address);
       registerTransaction.feePayer = defaultPayer.publicKey;
       registerTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
+      console.log('Registration transaction prepared:', registerTransaction);
 
       await sendAndConfirmTransaction(connection, registerTransaction, [playerKeypair, defaultPayer], { skipPreflight: false, preflightCommitment: "confirmed" });
+      console.log('Player entry registered successfully.');
     } catch (error) {
       if (!error.message.includes("already in use")) {
+        console.error('Error during player entry registration:', error);
         throw error;  // Re-throw if it's not the "already in use" error
+      } else {
+        console.log('Player entry already in use, skipping registration.');
       }
     }
 
     res.json({ message: 'User registered and player account initialized successfully' });
   } catch (error) {
+    console.error('Failed to initialize and register player account:', error);
     res.status(500).json({ error: 'Failed to initialize and register player account', details: error.message });
   }
 });
+
 
 app.post('/get-server-time', (req: Request, res: Response) => {
   const { walletAddress } = req.body;
@@ -202,7 +230,7 @@ app.post('/checkPlayerStatus', async (req: Request, res: Response) => {
     let isRegistered = false;
 
     try {
-      const { transaction: initPlayerTransaction } = await client.initializePlayerAccount(player, "PlayerUsername", new PublicKey(user.publicKey));
+      const { transaction: initPlayerTransaction } = await client.initializePlayerAccount(new PublicKey(user.publicKey), "PlayerUsername", LEADERBOARD_NFT_PUBKEY);
       initPlayerTransaction.feePayer = defaultPayer.publicKey;
       initPlayerTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
       await sendAndConfirmTransaction(connection, initPlayerTransaction, [defaultPayer]);
@@ -215,7 +243,7 @@ app.post('/checkPlayerStatus', async (req: Request, res: Response) => {
 
     try {
       const leaderboardAccount = await client.fetchLeaderBoardAccount(leaderboardPda);
-      const { transaction: registerPlayerTransaction } = await client.registerPlayerEntryForLeaderBoard(player, leaderboardAccount.address);
+      const { transaction: registerPlayerTransaction } = await client.registerPlayerEntryForLeaderBoard(new PublicKey(user.publicKey), leaderboardAccount.address);
       registerPlayerTransaction.feePayer = defaultPayer.publicKey;
       registerPlayerTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
       await sendAndConfirmTransaction(connection, registerPlayerTransaction, [defaultPayer]);

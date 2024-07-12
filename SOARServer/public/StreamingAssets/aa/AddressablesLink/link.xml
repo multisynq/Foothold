@@ -3,12 +3,15 @@
     <type fullname="bounceNoise" preserve="all" />
     <type fullname="ChangeColorByHealth" preserve="all" />
     <type fullname="ChooseModelBasedOnDistance" preserve="all" />
+    <type fullname="destroyOnTime" preserve="all" />
     <type fullname="EnemyRandomizer" preserve="all" />
     <type fullname="ExplodeOnEnding" preserve="all" />
     <type fullname="GameState" preserve="all" />
     <type fullname="HealthCoinController" preserve="all" />
     <type fullname="moveAround" preserve="all" />
     <type fullname="RaiseAlignToTerrain" preserve="all" />
+    <type fullname="randomizePropertiesSome" preserve="all" />
+    <type fullname="sceneCleanUpInitiative" preserve="all" />
     <type fullname="SetMyColorFromIndex" preserve="all" />
     <type fullname="Shake" preserve="all" />
     <type fullname="SimpleAudioRequester" preserve="all" />
