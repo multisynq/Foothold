@@ -185,7 +185,7 @@ app.post('/submit-score', async (req: Request, res: Response) => {
     // Retrieve the player's keypair from the secret key
     const playerKeypair = Keypair.fromSecretKey(bs58.decode(user.secretKey));
     console.log('Player keypair:', playerKeypair.publicKey.toBase58());
-    
+
     // Create the transaction instruction
     const { transaction: submitScoreTransaction } = await client.submitScoreToLeaderBoard(
       playerKeypair.publicKey,    // Player public key
@@ -193,7 +193,7 @@ app.post('/submit-score', async (req: Request, res: Response) => {
       leaderboardAccount.address, // Leaderboard account address
       new BN(score)               // Score to be submitted
     );
-
+    // console.dir(submitScoreTransaction, { depth: null });
     // Set transaction fee payer and recent blockhash
     submitScoreTransaction.feePayer = defaultPayer.publicKey;
     submitScoreTransaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
@@ -215,7 +215,18 @@ app.post('/submit-score', async (req: Request, res: Response) => {
     console.error('Error submitting score to leaderboard:', error.message);
     res.status(500).json({ error: 'Failed to submit score to leaderboard.', details: error.message });
   }
-});
+});    
+
+const enum Seeds {
+  GAME = "game",
+  LEADER = "leaderboard",
+  ACHIEVEMENT = "achievement",
+  PLAYER = "player",
+  PLAYER_SCORES = "player-scores-list",
+  PLAYER_ACHIEVEMENT = "player-achievement",
+  LEADER_TOP_ENTRIES = "top-scores",
+  NFT_CLAIM = "nft-claim",
+}
 
 app.post('/checkPlayerStatus', async (req: Request, res: Response) => {
   const { walletAddress } = req.body;
@@ -266,26 +277,72 @@ app.post('/get-leaderboard', async (req: Request, res: Response) => {
     const topEntriesAccount = await client.fetchLeaderBoardTopEntriesAccount(leaderboardAccount.topEntries as PublicKey);
     const myWallet = req.body.wallet;
     const max = req.body.max || 5;
-    const meAndTopNScores = getMeAndTopNScores(topEntriesAccount, myWallet, max);
+
+    // Fetch user from the database
+    const user = users.findOne({ walletAddress: myWallet });
+    const myPublicKey = user ? new PublicKey(user.publicKey).toBase58() : null;
+    console.log('myPublicKey:', myPublicKey);
+    const meAndTopNScores = getMeAndTopNScores(topEntriesAccount, myPublicKey, max);
     res.json(meAndTopNScores);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
-
-function getMeAndTopNScores(topEntriesAccount: any, myWallet: any, max = 5) {
-  let resList = [] as any;
-  topEntriesAccount.topScores.forEach((score: any, index: number) => {
-    const wallet = score.player.toBase58();
-    const score1 = score.entry.score.toString();
-    if (wallet === myWallet) {
-      resList.push({ rank: index + 1, wallet, score1 });
-    }
-    if (index < max) resList.push({ rank: index + 1, wallet, score1 });
-  });
-  return resList.sort((a: any, b: any) => a.rank - b.rank);
+const PROGRAM_ADDRESS = "SoarNNzwQHMwcfdkdLc6kvbkoMSxcHy89gTHrjhJYkk";
+const PROGRAM_ID = new PublicKey(PROGRAM_ADDRESS);
+function derivePlayerAddress(user: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from(Seeds.PLAYER), user.toBuffer()],
+    PROGRAM_ID
+  );
 }
+function getMeAndTopNScores(topEntriesAccount: any, myPublicKey: any, max = 5) {
+  let resList = [] as any;
+  let myScore: any = null;
 
+  // Filter out invalid scores
+  topEntriesAccount.topScores = topEntriesAccount.topScores.filter((score: any) => {
+    const player = score.player.toBase58();
+    const playerScore = score.entry.score.toString();
+    const timestamp = score.entry.timestamp;
+    return !(player === '11111111111111111111111111111111' || playerScore === '18446744073709551615' || timestamp === 0);
+  });
+  myPublicKey = derivePlayerAddress(new PublicKey(myPublicKey))[0].toBase58();
+  // Push valid scores into the array and label "YOU"
+  topEntriesAccount.topScores.forEach((score: any) => {
+    console.log(myPublicKey, score.player.toBase58());
+    const wallet = score.player.toBase58();
+    const score1 = parseInt(score.entry.score.toString(), 10);
+    if (wallet === myPublicKey) {
+      myScore = { wallet: 'You', score: score1 };
+      resList.push({ wallet: 'You', score: score1 });
+    } else {
+      resList.push({ wallet, score: score1 });
+    }
+  });
+
+  // Sort the array by score in descending order
+  resList.sort((a: any, b: any) => b.score - a.score);
+
+  // Recalculate ranks
+  resList.forEach((score: any, index: number) => {
+    score.rank = index + 1;
+  });
+
+  // Ensure "YOU" is included if it exists and is not in the top 5
+  const topNScores = resList.slice(0, max);
+  if (myScore && !topNScores.some((score: any) => score.wallet === 'You')) {
+    topNScores.push(myScore);
+  }
+
+  // Recalculate ranks after ensuring "YOU" is included
+  topNScores.sort((a: any, b: any) => b.score - a.score);
+  topNScores.forEach((score: any, index: number) => {
+    score.rank = index + 1;
+  });
+
+  return topNScores;
+}
 function verifySignature(walletAddress: string, message: string, signedMessage: string): boolean {
   const messageBytes = decodeUTF8(message);
   const signedMessageBytes = bs58.decode(signedMessage);
